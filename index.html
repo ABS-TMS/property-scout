@@ -204,7 +204,7 @@ form.addEventListener('submit', async (e) => {
   statusEl.textContent = 'Compiling report from public sources — this can take 20–40 seconds...';
 
   try {
-    const res = await fetch('/api/property-report', {
+    const res = await fetch('/.netlify/functions/property-report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ address, county }),
