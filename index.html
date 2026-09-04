@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Property Scout</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<style>
+  :root {
+    --navy: #1B2A41;
+    --gold: #B8892B;
+    --slate: #4A5568;
+    --light: #F4F1EA;
+    --line: #D9D2C4;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--light);
+    color: #20242C;
+    margin: 0;
+    padding: 24px 16px 60px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  header { margin-bottom: 24px; }
+  .kicker { font-size: 12px; font-weight: 700; color: var(--gold); letter-spacing: 0.06em; text-transform: uppercase; }
+  h1 { font-size: 26px; color: var(--navy); margin: 4px 0 4px; }
+  .sub { color: var(--slate); font-size: 14px; }
+
+  form {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-end;
+    margin-bottom: 24px;
+  }
+  .field { flex: 1 1 220px; }
+  label { display: block; font-size: 12px; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+  input, select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-size: 14px;
+  }
+  button {
+    background: var(--navy);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 11px 20px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.6; cursor: default; }
+  button.secondary { background: var(--gold); }
+
+  #status { font-size: 14px; color: var(--slate); margin: 8px 0 20px; min-height: 20px; }
+  #error { color: #7A2E2E; background: #F7ECEC; border: 1px solid #D9B9B9; padding: 12px 14px; border-radius: 8px; font-size: 14px; display: none; margin-bottom: 20px; }
+
+  #report { display: none; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 28px; }
+  #report h2 { color: var(--navy); font-size: 18px; border-bottom: 2px solid var(--navy); padding-bottom: 6px; margin-top: 28px; }
+  #report h2:first-of-type { margin-top: 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+  td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--navy); color: #fff; font-size: 11px; text-transform: uppercase; }
+  tr:nth-child(even) td { background: #F7F5F0; }
+  .kv td:first-child { font-weight: 700; color: var(--navy); width: 200px; }
+  .disclaimer { background: #F7ECEC; border: 1px solid #D9B9B9; border-radius: 8px; padding: 14px 16px; font-size: 12px; color: #7A2E2E; font-weight: 700; margin-top: 24px; }
+  .actions { display: flex; gap: 10px; margin-top: 20px; }
+  .source-note { font-size: 11px; color: var(--slate); margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="kicker">Property Scout</div>
+    <h1>Public Property Records Report</h1>
+    <div class="sub">Enter an address and county to compile listing, tax, permit, and risk data from public sources.</div>
+  </header>
+
+  <form id="intake">
+    <div class="field">
+      <label for="address">Property Address</label>
+      <input type="text" id="address" placeholder="800 Ledara Ln, Keller, TX" required>
+    </div>
+    <div class="field" style="flex: 0 1 200px;">
+      <label for="county">County</label>
+      <select id="county" required>
+        <option value="">Select county</option>
+        <option>Tarrant</option>
+        <option>Dallas</option>
+        <option>Denton</option>
+        <option>Collin</option>
+        <option>Parker</option>
+        <option>Wise</option>
+        <option>Johnson</option>
+        <option>Grayson</option>
+        <option>Montague</option>
+        <option>Cooke</option>
+        <option>Hunt</option>
+      </select>
+    </div>
+    <button type="submit" id="submitBtn">Generate Report</button>
+  </form>
+
+  <div id="status"></div>
+  <div id="error"></div>
+
+  <div id="report"></div>
+</div>
+
+<script>
+const form = document.getElementById('intake');
+const statusEl = document.getElementById('status');
+const errorEl = document.getElementById('error');
+const reportEl = document.getElementById('report');
+const submitBtn = document.getElementById('submitBtn');
+
+function esc(v) {
+  if (v === null || v === undefined || v === '') return '—';
+  return String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function kvTable(rows) {
+  return '<table class="kv">' + rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('') + '</table>';
+}
+
+function listTable(headers, rows) {
+  if (!rows || !rows.length) return '<p style="font-size:13px;color:#4A5568;">No records found.</p>';
+  const head = '<tr>' + headers.map(h => `<th>${esc(h)}</th>`).join('') + '</tr>';
+  const body = rows.map(r => '<tr>' + r.map(c => `<td>${esc(c)}</td>`).join('') + '</tr>').join('');
+  return `<table>${head}${body}</table>`;
+}
+
+function renderReport(r) {
+  const s = r.snapshot || {};
+  const l = r.listingStatus || {};
+  const pz = r.permitsZoning || {};
+  const cr = r.climateRisk || {};
+
+  reportEl.innerHTML = `
+    <div class="kicker" style="color:#B8892B;font-size:11px;font-weight:700;">PROPERTY RECORDS REPORT</div>
+    <h1 style="color:#1B2A41;font-size:22px;margin:4px 0;">${esc(r.address)}</h1>
+    <div style="color:#4A5568;font-size:13px;">${esc(r.county)} County — compiled ${esc(r.compiledDate)}</div>
+
+    <h2>Property Snapshot</h2>
+    ${kvTable([
+      ['APN', s.apn], ['Legal Description', s.legalDescription], ['Property Type', s.propertyType],
+      ['Zoning', s.zoning], ['Year Built', s.yearBuilt], ['Living Area', s.livingArea],
+      ['Lot Size', s.lotSize], ['Bed / Bath', s.bedsBaths], ['Garage / Parking', s.garage],
+      ['School District', s.schoolDistrict],
+    ])}
+
+    <h2>Current Listing Status</h2>
+    ${kvTable([
+      ['MLS #', l.mlsNumber], ['Status', l.status], ['List Price', l.listPrice],
+      ['List Date', l.listDate], ['Listing Agent', l.listingAgent], ['Market Context', l.marketContext],
+    ])}
+
+    <h2>Sale History</h2>
+    ${listTable(['Date', 'Event', 'Price', 'Notes'], (r.saleHistory || []).map(x => [x.date, x.event, x.price, x.notes]))}
+
+    <h2>Tax &amp; Assessment History</h2>
+    ${listTable(['Year', 'Tax', 'YoY Change', 'Assessed'], (r.taxHistory || []).map(x => [x.year, x.tax, x.yoyChange, x.assessed]))}
+
+    <h2>Permits &amp; Zoning</h2>
+    ${kvTable([['Zoning Detail', pz.zoningDetail]])}
+    ${listTable(['Date', 'Type', 'Status'], (pz.permits || []).map(x => [x.date, x.type, x.status]))}
+
+    <h2>Climate &amp; Environmental Risk</h2>
+    ${kvTable([['Flood', cr.flood], ['Fire', cr.fire], ['Heat', cr.heat], ['Wind', cr.wind], ['Air', cr.air]])}
+
+    <div class="disclaimer">
+      ACCURACY DISCLAIMER — This report is compiled from third-party public listing, appraisal, and permit
+      sources and is provided for general informational and due-diligence purposes only. It is not a survey,
+      title report, or legal determination of ownership, boundaries, or property condition, and Attorney
+      Broker Services, LLC makes no warranty as to its accuracy or completeness. Data such as listing status,
+      assessed values, and permit history can change daily. Verify independently before relying on it in a
+      transaction.
+    </div>
+    <div class="source-note">Sources: ${esc((r.sources || []).join(', ') || 'not specified')}</div>
+    <div class="actions">
+      <button type="button" class="secondary" onclick="downloadPdf()">Download PDF</button>
+    </div>
+  `;
+  reportEl.style.display = 'block';
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const address = document.getElementById('address').value.trim();
+  const county = document.getElementById('county').value;
+  if (!address || !county) return;
+
+  errorEl.style.display = 'none';
+  reportEl.style.display = 'none';
+  submitBtn.disabled = true;
+  statusEl.textContent = 'Compiling report from public sources — this can take 20–40 seconds...';
+
+  try {
+    const res = await fetch('/api/property-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address, county }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Something went wrong');
+    }
+    renderReport(data.report);
+    statusEl.textContent = '';
+  } catch (err) {
+    errorEl.textContent = 'Could not generate report: ' + err.message;
+    errorEl.style.display = 'block';
+    statusEl.textContent = '';
+  } finally {
+    submitBtn.disabled = false;
+  }
+});
+
+function downloadPdf() {
+  const el = document.getElementById('report');
+  html2pdf().from(el).set({
+    margin: 0.5,
+    filename: 'Property-Records-Report.pdf',
+    jsPDF: { unit: 'in', format: 'letter' },
+  }).save();
+}
+</script>
+</body>
+</html>
