@@ -192,6 +192,8 @@ function renderReport(r) {
   reportEl.style.display = 'block';
 }
 
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const address = document.getElementById('address').value.trim();
@@ -201,19 +203,40 @@ form.addEventListener('submit', async (e) => {
   errorEl.style.display = 'none';
   reportEl.style.display = 'none';
   submitBtn.disabled = true;
-  statusEl.textContent = 'Compiling report from public sources — this can take 20–40 seconds...';
+  statusEl.textContent = 'Compiling report from public sources — this can take 20–60 seconds...';
+
+  const jobId = (crypto.randomUUID && crypto.randomUUID()) || (Date.now() + '-' + Math.random().toString(36).slice(2));
 
   try {
-    const res = await fetch('/.netlify/functions/property-report', {
+    // Kick off the background job (returns immediately, doesn't block)
+    await fetch('/.netlify/functions/property-report-background', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ address, county }),
+      body: JSON.stringify({ jobId, address, county }),
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Something went wrong');
+
+    // Poll for the result
+    const maxAttempts = 40; // ~2 minutes at 3s intervals
+    let result = null;
+    for (let i = 0; i < maxAttempts; i++) {
+      await sleep(3000);
+      const statusRes = await fetch('/.netlify/functions/property-report-status?jobId=' + encodeURIComponent(jobId));
+      const statusData = await statusRes.json();
+      if (statusData.status === 'done') {
+        result = statusData.report;
+        break;
+      }
+      if (statusData.status === 'error') {
+        throw new Error(statusData.error || 'Report generation failed');
+      }
+      statusEl.textContent = 'Still compiling — checking public sources (' + ((i + 1) * 3) + 's)...';
     }
-    renderReport(data.report);
+
+    if (!result) {
+      throw new Error('Report is taking longer than expected. Please try again.');
+    }
+
+    renderReport(result);
     statusEl.textContent = '';
   } catch (err) {
     errorEl.textContent = 'Could not generate report: ' + err.message;
