@@ -123,7 +123,7 @@ export default async (req: Request, context: Context) => {
       return;
     }
 
-    await store.setJSON(jobId, { status: "done", report });
+    await store.setJSON(jobId, { status: "done", report, generatedAt: Date.now() });
   } catch (err: any) {
     await store.setJSON(jobId, { status: "error", error: "Server error: " + String(err) });
   }
