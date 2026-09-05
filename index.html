@@ -78,6 +78,16 @@
 </head>
 <body>
 <div class="wrap">
+  <div id="pinGate" style="max-width:340px;margin:80px auto;background:#fff;border:1px solid var(--line);border-radius:10px;padding:28px;text-align:center;">
+    <div class="kicker">Property Scout</div>
+    <h1 style="font-size:18px;">Agent Access</h1>
+    <p class="sub" style="margin-bottom:16px;">Enter your access PIN to continue.</p>
+    <input type="password" id="pinInput" inputmode="numeric" placeholder="PIN" style="text-align:center;letter-spacing:2px;margin-bottom:10px;">
+    <button type="button" id="pinSubmit" style="width:100%;">Unlock</button>
+    <div id="pinError" style="color:#7A2E2E;font-size:12px;margin-top:10px;display:none;">Incorrect PIN.</div>
+  </div>
+
+  <div id="mainContent" style="display:none;">
   <header>
     <div class="kicker">Property Scout</div>
     <h1>Public Property Records Report</h1>
@@ -116,9 +126,42 @@
   <div id="error"></div>
 
   <div id="report"></div>
+  </div>
 </div>
 
 <script>
+const ACCESS_PIN = '0802'; // change this and the PROPERTY_SCOUT_PIN Netlify env var together
+
+(function initGate() {
+  const gate = document.getElementById('pinGate');
+  const main = document.getElementById('mainContent');
+  const input = document.getElementById('pinInput');
+  const submitPin = document.getElementById('pinSubmit');
+  const pinError = document.getElementById('pinError');
+
+  function unlock() {
+    gate.style.display = 'none';
+    main.style.display = 'block';
+    sessionStorage.setItem('ps_pin_ok', '1');
+  }
+
+  if (sessionStorage.getItem('ps_pin_ok') === '1') {
+    unlock();
+    return;
+  }
+
+  function tryUnlock() {
+    if (input.value.trim() === ACCESS_PIN) {
+      unlock();
+    } else {
+      pinError.style.display = 'block';
+    }
+  }
+
+  submitPin.addEventListener('click', tryUnlock);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryUnlock(); });
+})();
+
 const form = document.getElementById('intake');
 const statusEl = document.getElementById('status');
 const errorEl = document.getElementById('error');
@@ -247,7 +290,7 @@ form.addEventListener('submit', async (e) => {
     await fetch('/.netlify/functions/property-report-background', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jobId, address, county }),
+      body: JSON.stringify({ jobId, address, county, pin: ACCESS_PIN }),
     });
 
     // Poll for the result
