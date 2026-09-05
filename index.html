@@ -107,6 +107,9 @@
       </select>
     </div>
     <button type="submit" id="submitBtn">Generate Report</button>
+    <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400;color:var(--slate);flex:0 0 auto;">
+      <input type="checkbox" id="forceRefresh" style="width:auto;"> Force fresh lookup
+    </label>
   </form>
 
   <div id="status"></div>
@@ -138,7 +141,7 @@ function listTable(headers, rows) {
   return `<table>${head}${body}</table>`;
 }
 
-function renderReport(r) {
+function renderReport(r, generatedAt) {
   const s = r.snapshot || {};
   const l = r.listingStatus || {};
   const pz = r.permitsZoning || {};
@@ -148,6 +151,7 @@ function renderReport(r) {
     <div class="kicker" style="color:#B8892B;font-size:11px;font-weight:700;">PROPERTY RECORDS REPORT</div>
     <h1 style="color:#1B2A41;font-size:22px;margin:4px 0;">${esc(r.address)}</h1>
     <div style="color:#4A5568;font-size:13px;">${esc(r.county)} County — compiled ${esc(r.compiledDate)}</div>
+    <div style="color:#4A5568;font-size:12px;font-style:italic;margin-top:2px;">${freshnessNote(generatedAt)}</div>
 
     <h2>Property Snapshot</h2>
     ${kvTable([
@@ -194,20 +198,51 @@ function renderReport(r) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+function cacheKeyFor(address, county) {
+  const norm = address.trim().toLowerCase().replace(/\s+/g, ' ');
+  return county.trim().toLowerCase() + '|' + norm;
+}
+
+function freshnessNote(generatedAt) {
+  if (!generatedAt) return '';
+  const ageMs = Date.now() - generatedAt;
+  const ageHrs = ageMs / (1000 * 60 * 60);
+  if (ageHrs < 0.05) return 'Just generated.';
+  if (ageHrs < 1) return 'Generated ' + Math.round(ageHrs * 60) + ' minutes ago (cached).';
+  return 'Generated ' + Math.round(ageHrs) + ' hour' + (Math.round(ageHrs) === 1 ? '' : 's') + ' ago (cached).';
+}
+
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const address = document.getElementById('address').value.trim();
   const county = document.getElementById('county').value;
+  const forceRefresh = document.getElementById('forceRefresh').checked;
   if (!address || !county) return;
 
   errorEl.style.display = 'none';
   reportEl.style.display = 'none';
   submitBtn.disabled = true;
-  statusEl.textContent = 'Compiling report from public sources — this can take 20–60 seconds...';
 
-  const jobId = (crypto.randomUUID && crypto.randomUUID()) || (Date.now() + '-' + Math.random().toString(36).slice(2));
+  const jobId = cacheKeyFor(address, county);
 
   try {
+    // Check for a cached, still-fresh report first (unless the user asked to skip it)
+    if (!forceRefresh) {
+      statusEl.textContent = 'Checking for a recent report on this address...';
+      const cachedRes = await fetch('/.netlify/functions/property-report-status?jobId=' + encodeURIComponent(jobId));
+      const cached = await cachedRes.json();
+      if (cached.status === 'done' && cached.generatedAt && (Date.now() - cached.generatedAt) < CACHE_TTL_MS) {
+        renderReport(cached.report, cached.generatedAt);
+        statusEl.textContent = '';
+        submitBtn.disabled = false;
+        return;
+      }
+    }
+
+    statusEl.textContent = 'Compiling report from public sources — this can take 20–60 seconds...';
+
     // Kick off the background job (returns immediately, doesn't block)
     await fetch('/.netlify/functions/property-report-background', {
       method: 'POST',
@@ -218,12 +253,14 @@ form.addEventListener('submit', async (e) => {
     // Poll for the result
     const maxAttempts = 40; // ~2 minutes at 3s intervals
     let result = null;
+    let generatedAt = null;
     for (let i = 0; i < maxAttempts; i++) {
       await sleep(3000);
       const statusRes = await fetch('/.netlify/functions/property-report-status?jobId=' + encodeURIComponent(jobId));
       const statusData = await statusRes.json();
       if (statusData.status === 'done') {
         result = statusData.report;
+        generatedAt = statusData.generatedAt;
         break;
       }
       if (statusData.status === 'error') {
@@ -236,7 +273,7 @@ form.addEventListener('submit', async (e) => {
       throw new Error('Report is taking longer than expected. Please try again.');
     }
 
-    renderReport(result);
+    renderReport(result, generatedAt);
     statusEl.textContent = '';
   } catch (err) {
     errorEl.textContent = 'Could not generate report: ' + err.message;
